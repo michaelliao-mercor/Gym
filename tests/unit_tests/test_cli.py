@@ -31,43 +31,59 @@ from nemo_gym.cli import (
     _GRACEFUL_SHUTDOWN_TIMEOUT_SEC,
     RunConfig,
     RunHelper,
-    _select_shard,
+    _run_module_tests_all,
     display_help,
     init_resources_server,
 )
 from nemo_gym.config_types import ResourcesServerInstanceConfig
 
 
-class TestSelectShard:
-    def test_no_sharding_returns_all(self) -> None:
+class TestRunModuleTestsAll:
+    def test_sequential_runs_all_in_order(self) -> None:
         paths = [Path(f"resources_servers/s{i}") for i in range(5)]
-        assert _select_shard(paths, shard_index=0, num_shards=1) == paths
+        seen: list[Path] = []
 
-    def test_round_robin_partition_is_complete_and_disjoint(self) -> None:
-        paths = [Path(f"resources_servers/s{i:02d}") for i in range(10)]
-        num_shards = 4
-        shards = [_select_shard(paths, i, num_shards) for i in range(num_shards)]
-        # Every module appears in exactly one shard, and the union is the full sorted set.
-        flattened = [p for shard in shards for p in shard]
-        assert sorted(flattened, key=str) == sorted(paths, key=str)
-        assert len(flattened) == len(set(flattened)) == len(paths)
-        # Round-robin stride: shard 0 gets indices 0,4,8 of the sorted list.
-        assert shards[0] == [
-            Path("resources_servers/s00"),
-            Path("resources_servers/s04"),
-            Path("resources_servers/s08"),
-        ]
+        def run_one(p: Path) -> Path:
+            seen.append(p)
+            return p
 
-    def test_balanced_sizes(self) -> None:
-        paths = [Path(f"resources_servers/s{i:02d}") for i in range(10)]
-        sizes = sorted(len(_select_shard(paths, i, 4)) for i in range(4))
-        # 10 across 4 shards -> sizes differ by at most 1.
-        assert sizes[-1] - sizes[0] <= 1
+        results = _run_module_tests_all(run_one, paths, max_concurrency=1)
+        assert results == paths
+        assert seen == paths  # max_concurrency=1 preserves order
 
-    def test_shard_index_out_of_range_raises(self) -> None:
-        paths = [Path("resources_servers/s0")]
-        with raises(AssertionError):
-            _select_shard(paths, shard_index=4, num_shards=4)
+    def test_concurrent_runs_every_module_exactly_once(self) -> None:
+        paths = [Path(f"resources_servers/s{i:02d}") for i in range(20)]
+
+        def run_one(p: Path) -> Path:
+            return p
+
+        results = _run_module_tests_all(run_one, paths, max_concurrency=8)
+        # Completion order is non-deterministic, but every module must run exactly once.
+        assert sorted(results, key=str) == sorted(paths, key=str)
+        assert len(results) == len(set(results)) == len(paths)
+
+    def test_concurrency_actually_overlaps(self) -> None:
+        import threading
+        from time import sleep
+
+        paths = [Path(f"resources_servers/s{i}") for i in range(8)]
+        lock = threading.Lock()
+        in_flight = 0
+        max_in_flight = 0
+
+        def run_one(p: Path) -> Path:
+            nonlocal in_flight, max_in_flight
+            with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            sleep(0.05)
+            with lock:
+                in_flight -= 1
+            return p
+
+        _run_module_tests_all(run_one, paths, max_concurrency=4)
+        # With a pool of 4, multiple modules must have been in flight simultaneously.
+        assert max_in_flight >= 2
 
 
 # TODO: Eventually we want to add more tests to ensure that the CLI flows do not break
