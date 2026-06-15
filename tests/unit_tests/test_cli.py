@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 from omegaconf import OmegaConf
 from pytest import MonkeyPatch, raises
 
+import nemo_gym.cli
 import nemo_gym.global_config
 from nemo_gym import PARENT_DIR
 from nemo_gym.cli import (
@@ -34,8 +35,9 @@ from nemo_gym.cli import (
     _select_shard,
     display_help,
     init_resources_server,
+    validate,
 )
-from nemo_gym.config_types import ResourcesServerInstanceConfig
+from nemo_gym.config_types import ResourcesServerInstanceConfig, ServerRefNotFoundError
 
 
 class TestSelectShard:
@@ -260,3 +262,32 @@ class TestRunHelperShutdownReap:
         assert a.wait.call_count == 1
         assert b.wait.call_count == 1
         assert runner._processes == {}
+
+
+class TestValidate:
+    """ng_validate parses + validates the config and exits 0/1 without starting Ray or servers."""
+
+    def test_validate_passes_on_valid_config(self, monkeypatch: MonkeyPatch) -> None:
+        cfg = OmegaConf.create(
+            {
+                "my_server": {
+                    "resources_servers": {
+                        "x": {"entrypoint": "app.py", "domain": "other"},
+                    }
+                }
+            }
+        )
+        monkeypatch.setattr(nemo_gym.cli, "get_global_config_dict", lambda *a, **k: cfg)
+
+        # Should return normally (no SystemExit) on a valid config.
+        validate()
+
+    def test_validate_exits_nonzero_on_invalid_config(self, monkeypatch: MonkeyPatch) -> None:
+        def boom(*a, **k):
+            raise ServerRefNotFoundError("references resources_servers/'typo' which is not defined")
+
+        monkeypatch.setattr(nemo_gym.cli, "get_global_config_dict", boom)
+
+        with raises(SystemExit) as exc_info:
+            validate()
+        assert exc_info.value.code == 1

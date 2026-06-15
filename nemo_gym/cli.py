@@ -923,6 +923,33 @@ def dump_config():  # pragma: no cover
     print(OmegaConf.to_yaml(global_config_dict, resolve=True))
 
 
+def validate():
+    """
+    Validate a NeMo Gym configuration without starting any servers.
+
+    Runs the full config parse and validation pipeline — config_paths loading, key resolution,
+    cross-reference checks, and per-server validation — with no Ray initialization and no server
+    subprocesses. Exits 0 if the configuration is valid, 1 otherwise. Intended as a fast pre-flight
+    check before a run or a cluster submission.
+
+    Examples:
+
+    ```bash
+    ng_validate "+config_paths=[<config1>,<config2>]"
+    ```
+    """
+    try:
+        global_config_dict = get_global_config_dict()
+        # Mirrors `run`/`dump_config`: handles the +h=true help path and final config validation.
+        BaseNeMoGymCLIConfig.model_validate(global_config_dict)
+    except Exception as e:
+        rich.print(f"[red]✗ Config validation failed:[/red] {type(e).__name__}: {e}")
+        sys.exit(1)
+
+    server_instances = [k for k in global_config_dict.keys() if k not in NEMO_GYM_RESERVED_TOP_LEVEL_KEYS]
+    rich.print(f"[green]✓ Config is valid[/green] — {len(server_instances)} server instance(s) configured.")
+
+
 def display_help():
     """
     Display a list of available NeMo Gym CLI commands.
