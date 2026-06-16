@@ -23,7 +23,7 @@ from pytest import MonkeyPatch, raises
 import nemo_gym.global_config
 import nemo_gym.server_utils
 from nemo_gym import CACHE_DIR, WORKING_DIR
-from nemo_gym.config_types import ServerRefNotFoundError
+from nemo_gym.config_types import ConfigPathNotFoundError, NoServerInstancesError, ServerRefNotFoundError
 from nemo_gym.global_config import (
     DEFAULT_HEAD_SERVER_PORT,
     NEMO_GYM_CONFIG_DICT_ENV_VAR_NAME,
@@ -482,6 +482,31 @@ class TestGlobalConfig:
         # Fuzzy match should suggest the correctly-spelled resources server, scoped to the same type.
         assert "Did you mean" in message
         assert "'resources'" in message
+
+    def test_load_extra_config_paths_raises_actionable_error_for_missing_file(self) -> None:
+        # A config_paths entry that doesn't exist should raise an actionable error naming the
+        # entry and the locations searched — not a bare OmegaConf FileNotFoundError traceback.
+        parser = GlobalConfigDictParser()
+        with raises(ConfigPathNotFoundError) as exc_info:
+            parser.load_extra_config_paths(["resources_servers/does_not_exist/configs/nope.yaml"])
+
+        message = str(exc_info.value)
+        assert "resources_servers/does_not_exist/configs/nope.yaml" in message
+        assert "Looked in:" in message
+
+    def test_raise_on_no_server_instances_raises_when_empty(self) -> None:
+        parser = GlobalConfigDictParser()
+        # Only reserved keys / no server instances -> nothing to run.
+        config = DictConfig({"config_paths": [], "head_server": {"port": 11000}})
+        with raises(NoServerInstancesError) as exc_info:
+            parser.raise_on_no_server_instances(config)
+        assert "config_paths" in str(exc_info.value)
+
+    def test_raise_on_no_server_instances_passes_with_a_server(self) -> None:
+        parser = GlobalConfigDictParser()
+        config = DictConfig({"my_server": {"resources_servers": {"x": {"entrypoint": "app.py", "domain": "other"}}}})
+        # Should not raise when at least one server instance is configured.
+        parser.raise_on_no_server_instances(config)
 
     def test_get_first_server_config_dict(self) -> None:
         global_config_dict = DictConfig(

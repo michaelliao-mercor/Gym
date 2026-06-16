@@ -49,6 +49,7 @@ from nemo_gym.global_config import (
     NEMO_GYM_CONFIG_DICT_ENV_VAR_NAME,
     NEMO_GYM_CONFIG_PATH_ENV_VAR_NAME,
     NEMO_GYM_RESERVED_TOP_LEVEL_KEYS,
+    GlobalConfigDictParser,
     GlobalConfigDictParserConfig,
     get_global_config_dict,
 )
@@ -422,6 +423,9 @@ def run(
     global_config_dict = get_global_config_dict(global_config_dict_parser_config=global_config_dict_parser_config)
     # Just here for help
     BaseNeMoGymCLIConfig.model_validate(global_config_dict)
+
+    # Fail fast before starting Ray if nothing is configured to run.
+    GlobalConfigDictParser().raise_on_no_server_instances(global_config_dict)
 
     rh = RunHelper()
     rh.start(global_config_dict_parser_config)

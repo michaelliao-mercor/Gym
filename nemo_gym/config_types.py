@@ -140,6 +140,14 @@ class ServerRefNotFoundError(ValueError):
     """A server cross-reference points to an instance that is not defined in the merged config."""
 
 
+class ConfigPathNotFoundError(FileNotFoundError):
+    """A `config_paths` entry could not be found in the cwd or the Gym install location."""
+
+
+class NoServerInstancesError(ValueError):
+    """A run was requested but the merged config defines no server instances to start."""
+
+
 ########################################
 # Dataset configs for handling and upload/download
 ########################################
