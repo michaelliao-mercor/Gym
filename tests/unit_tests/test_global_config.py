@@ -23,7 +23,12 @@ from pytest import MonkeyPatch, raises
 import nemo_gym.global_config
 import nemo_gym.server_utils
 from nemo_gym import CACHE_DIR, WORKING_DIR
-from nemo_gym.config_types import ConfigPathNotFoundError, NoServerInstancesError, ServerRefNotFoundError
+from nemo_gym.config_types import (
+    ConfigPathNotFoundError,
+    MalformedConfigPathsError,
+    NoServerInstancesError,
+    ServerRefNotFoundError,
+)
 from nemo_gym.global_config import (
     DEFAULT_HEAD_SERVER_PORT,
     NEMO_GYM_CONFIG_DICT_ENV_VAR_NAME,
@@ -483,16 +488,65 @@ class TestGlobalConfig:
         assert "Did you mean" in message
         assert "'resources'" in message
 
-    def test_load_extra_config_paths_raises_actionable_error_for_missing_file(self) -> None:
-        # A config_paths entry that doesn't exist should raise an actionable error naming the
-        # entry and the locations searched — not a bare OmegaConf FileNotFoundError traceback.
+    def test_load_extra_config_paths_missing_relative_lists_both_locations(
+        self, monkeypatch: MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # A missing relative config_paths entry raises an actionable error naming the entry, both
+        # searched locations (cwd + install root), and the spelling hint — not a raw traceback.
+        cwd, parent = tmp_path / "cwd", tmp_path / "parent"
+        cwd.mkdir()
+        parent.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr(nemo_gym.global_config, "PARENT_DIR", parent)
+
         parser = GlobalConfigDictParser()
         with raises(ConfigPathNotFoundError) as exc_info:
-            parser.load_extra_config_paths(["resources_servers/does_not_exist/configs/nope.yaml"])
+            parser.load_extra_config_paths(["missing/nope.yaml"])
 
         message = str(exc_info.value)
-        assert "resources_servers/does_not_exist/configs/nope.yaml" in message
-        assert "Looked in:" in message
+        assert "missing/nope.yaml" in message
+        assert str(cwd / "missing/nope.yaml") in message
+        assert str(parent / "missing/nope.yaml") in message
+        assert "spelled correctly" in message
+
+    def test_load_extra_config_paths_missing_dedups_when_cwd_is_install_root(
+        self, monkeypatch: MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # When run from the repo root, cwd and install root coincide; the message lists one location.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(nemo_gym.global_config, "PARENT_DIR", tmp_path)
+
+        parser = GlobalConfigDictParser()
+        with raises(ConfigPathNotFoundError) as exc_info:
+            parser.load_extra_config_paths(["missing/nope.yaml"])
+
+        assert str(exc_info.value).count("  - ") == 1
+
+    def test_load_extra_config_paths_missing_absolute_path(self, tmp_path: Path) -> None:
+        missing = tmp_path / "absent.yaml"
+        parser = GlobalConfigDictParser()
+        with raises(ConfigPathNotFoundError) as exc_info:
+            parser.load_extra_config_paths([str(missing)])
+
+        message = str(exc_info.value)
+        assert str(missing) in message
+        assert message.count("  - ") == 1
+
+    def test_parse_malformed_config_paths_raises_actionable_error(self) -> None:
+        # A scalar config_paths (instead of a list) should raise an actionable error explaining the
+        # expected list syntax — not a raw Pydantic ValidationError traceback.
+        parser = GlobalConfigDictParser()
+        parse_config = GlobalConfigDictParserConfig(
+            initial_global_config_dict=DictConfig({"config_paths": "not_a_list.yaml"}),
+            skip_load_from_cli=True,
+            skip_load_from_dotenv=True,
+        )
+        with raises(MalformedConfigPathsError) as exc_info:
+            parser.parse(parse_config)
+
+        message = str(exc_info.value)
+        assert "config_paths" in message
+        assert "list" in message
 
     def test_raise_on_no_server_instances_raises_when_empty(self) -> None:
         parser = GlobalConfigDictParser()

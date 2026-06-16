@@ -19,6 +19,7 @@ import platform
 import shlex
 import sys
 from copy import deepcopy
+from functools import wraps
 from glob import glob
 from importlib.metadata import entry_points
 from importlib.metadata import version as md_version
@@ -38,12 +39,13 @@ import uvicorn
 from devtools import pprint
 from omegaconf import DictConfig, OmegaConf, open_dict
 from pydantic import Field
+from rich.markup import escape
 from rich.table import Table
 from tqdm.auto import tqdm
 
 from nemo_gym import PARENT_DIR, ROOT_DIR, __version__
 from nemo_gym.cli_setup_command import run_command, setup_env_command
-from nemo_gym.config_types import BaseNeMoGymCLIConfig
+from nemo_gym.config_types import BaseNeMoGymCLIConfig, ConfigError
 from nemo_gym.global_config import (
     DRY_RUN_KEY_NAME,
     NEMO_GYM_CONFIG_DICT_ENV_VAR_NAME,
@@ -70,6 +72,26 @@ from nemo_gym.train_data_utils import TrainDataProcessor
 _GRACEFUL_SHUTDOWN_TIMEOUT_SEC: int = 1
 # Grace period after SIGKILL for the kernel to reap the child and avoid <defunct> entries.
 _FORCE_KILL_REAP_TIMEOUT_SEC: int = 2
+
+
+def exit_cleanly_on_config_error(fn):
+    """Decorator: turn user-facing ConfigError into a clean message + non-zero exit.
+
+    Config mistakes (missing/typo'd config_paths, malformed config_paths, nothing configured to
+    run) should fail fast with an actionable message, not a Python traceback. Unexpected errors
+    still propagate normally.
+    """
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ConfigError as e:
+            # escape() so '[...]' in the message (e.g. config_paths examples) isn't eaten as rich markup.
+            rich.print(f"[red]Error:[/red] {escape(str(e))}")
+            raise SystemExit(1)
+
+    return wrapper
 
 
 class RunConfig(BaseNeMoGymCLIConfig):
@@ -130,6 +152,10 @@ class RunHelper:  # pragma: no cover
 
     def start(self, global_config_dict_parser_config: GlobalConfigDictParserConfig) -> None:
         global_config_dict = get_global_config_dict(global_config_dict_parser_config=global_config_dict_parser_config)
+
+        # Fail fast before starting Ray if nothing is configured to run (covers ng_run and the
+        # e2e rollout-collection path, which both start servers via this method).
+        GlobalConfigDictParser().raise_on_no_server_instances(global_config_dict)
 
         # Initialize Ray cluster in the main process
         # Note: This function will modify the global config dict - update `ray_head_node_address`
@@ -399,6 +425,7 @@ rpc_client.h:203: Failed to connect to GCS within 60 seconds. GCS may have been 
         return statuses
 
 
+@exit_cleanly_on_config_error
 def run(
     global_config_dict_parser_config: Optional[GlobalConfigDictParserConfig] = None,
 ):  # pragma: no cover
@@ -424,14 +451,12 @@ def run(
     # Just here for help
     BaseNeMoGymCLIConfig.model_validate(global_config_dict)
 
-    # Fail fast before starting Ray if nothing is configured to run.
-    GlobalConfigDictParser().raise_on_no_server_instances(global_config_dict)
-
     rh = RunHelper()
     rh.start(global_config_dict_parser_config)
     rh.run_forever()
 
 
+@exit_cleanly_on_config_error
 def e2e_rollout_collection():  # pragma: no cover
     global_config_dict = get_global_config_dict()
 

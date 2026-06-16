@@ -136,15 +136,29 @@ def is_server_ref(config_dict: DictConfig) -> Optional[ServerRef]:
         return None
 
 
-class ServerRefNotFoundError(ValueError):
+class ConfigError(Exception):
+    """Base for user-facing configuration errors.
+
+    These represent actionable user mistakes (typos, missing files, malformed input) rather than
+    internal bugs. The CLI catches `ConfigError` and prints just the message — no traceback —
+    while still leaving them as ordinary exceptions so callers like `ng_validate` can catch and
+    format them.
+    """
+
+
+class ServerRefNotFoundError(ConfigError, ValueError):
     """A server cross-reference points to an instance that is not defined in the merged config."""
 
 
-class ConfigPathNotFoundError(FileNotFoundError):
+class ConfigPathNotFoundError(ConfigError, FileNotFoundError):
     """A `config_paths` entry could not be found in the cwd or the Gym install location."""
 
 
-class NoServerInstancesError(ValueError):
+class MalformedConfigPathsError(ConfigError, ValueError):
+    """`config_paths` was not a list of paths (e.g. a scalar string was passed)."""
+
+
+class NoServerInstancesError(ConfigError, ValueError):
     """A run was requested but the merged config defines no server instances to start."""
 
 

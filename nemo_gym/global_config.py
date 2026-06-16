@@ -37,6 +37,7 @@ from wandb import Run
 from nemo_gym import CACHE_DIR, PARENT_DIR, RESULTS_DIR, WORKING_DIR
 from nemo_gym.config_types import (
     ConfigPathNotFoundError,
+    MalformedConfigPathsError,
     NoServerInstancesError,
     ServerInstanceConfig,
     ServerRefNotFoundError,
@@ -453,7 +454,14 @@ Duplicate config paths:
         merged_config_for_config_paths = OmegaConf.merge(dotenv_extra_config, global_config_dict)
         ta = TypeAdapter(List[str])
         config_paths = merged_config_for_config_paths.get(CONFIG_PATHS_KEY_NAME) or []
-        config_paths = ta.validate_python(config_paths)
+        try:
+            config_paths = ta.validate_python(config_paths)
+        except ValidationError as e:
+            raise MalformedConfigPathsError(
+                f"'{CONFIG_PATHS_KEY_NAME}' must be a list of paths. Got: {config_paths!r}.\n"
+                f"Pass it as a Hydra list, e.g.:\n"
+                f'  ng_run "+{CONFIG_PATHS_KEY_NAME}=[resources_servers/<env>/configs/<env>.yaml]"'
+            ) from e
 
         config_paths, extra_configs = self.load_extra_config_paths(config_paths)
 
