@@ -219,9 +219,9 @@ class GlobalConfigDictParser(BaseModel):
                 unique_locations = list(dict.fromkeys(str(p) for p in searched_locations))
                 searched = "\n".join(f"  - {p}" for p in unique_locations)
                 raise ConfigPathNotFoundError(
-                    f"config_paths entry '{original_entry}' was not found. Looked in:\n{searched}\n"
-                    f"Check the path is spelled correctly and is relative to your working directory "
-                    f"or the Gym install root."
+                    f"""config_paths entry '{original_entry}' was not found. Looked in:
+{searched}
+Check the path is spelled correctly and is relative to your working directory or the Gym install root."""
                 ) from e
             for new_config_path in extra_config.get(CONFIG_PATHS_KEY_NAME) or []:
                 if new_config_path not in config_paths:
@@ -267,10 +267,8 @@ Duplicate config paths:
             return
 
         raise NoServerInstancesError(
-            "No server instances are configured, so there is nothing to run. Pass one or more "
-            "configs via config_paths, e.g.:\n"
-            '  ng_run "+config_paths=[resources_servers/<env>/configs/<env>.yaml,'
-            'responses_api_models/<model>/configs/<model>.yaml]"'
+            """No server instances are configured, so there is nothing to run. Pass one or more configs via config_paths, e.g.:
+  ng_run "+config_paths=[resources_servers/<env>/configs/<env>.yaml,responses_api_models/<model>/configs/<model>.yaml]\""""
         )
 
     def validate_and_populate_defaults(
@@ -458,9 +456,9 @@ Duplicate config paths:
             config_paths = ta.validate_python(config_paths)
         except ValidationError as e:
             raise MalformedConfigPathsError(
-                f"'{CONFIG_PATHS_KEY_NAME}' must be a list of paths. Got: {config_paths!r}.\n"
-                f"Pass it as a Hydra list, e.g.:\n"
-                f'  ng_run "+{CONFIG_PATHS_KEY_NAME}=[resources_servers/<env>/configs/<env>.yaml]"'
+                f"""'{CONFIG_PATHS_KEY_NAME}' must be a list of paths. Got: {config_paths!r}.
+Pass it as a Hydra list, e.g.:
+  ng_run "+{CONFIG_PATHS_KEY_NAME}=[resources_servers/<env>/configs/<env>.yaml]\""""
             ) from e
 
         config_paths, extra_configs = self.load_extra_config_paths(config_paths)
